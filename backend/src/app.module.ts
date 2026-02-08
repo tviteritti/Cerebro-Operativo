@@ -4,9 +4,11 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ProjectsModule } from './projects/projects.module';
+import { IaModule } from './ia/ia.module';
 import { User } from './users/entities/user.entity';
 import { Project } from './projects/entities/project.entity';
 import { ProjectMember } from './projects/entities/project-member.entity';
+import { ProjectContext } from './ia/entities/project-context.entity';
 
 @Module({
   imports: [
@@ -22,7 +24,7 @@ import { ProjectMember } from './projects/entities/project-member.entity';
         username: configService.get<string>('DB_USERNAME', 'cerebro'),
         password: configService.get<string>('DB_PASSWORD', 'cerebro_secret_2024'),
         database: configService.get<string>('DB_NAME', 'cerebro_operativo'),
-        entities: [User, Project, ProjectMember],
+        entities: [User, Project, ProjectMember, ProjectContext],
         synchronize: true, // Solo para desarrollo - desactivar en producción
       }),
       inject: [ConfigService],
@@ -30,6 +32,7 @@ import { ProjectMember } from './projects/entities/project-member.entity';
     AuthModule,
     UsersModule,
     ProjectsModule,
+    IaModule,
   ],
 })
 export class AppModule {}

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Project, projectsApi, CreateProjectData } from '../api/projects';
+import { useNavigate } from 'react-router-dom';
+import { Project, projectsApi } from '../api/projects';
 
 interface AdminDashboardProps {
   projects: Project[];
@@ -10,6 +11,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   projects,
   onProjectCreated,
 }) => {
+  const navigate = useNavigate();
   const [showModal, setShowModal] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -69,6 +71,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {projects.map((project) => (
             <div
               key={project.id}
+              onClick={() => navigate(`/projects/${project.id}`)}
               className="bg-white rounded-2xl border border-gray-200 p-6 hover:shadow-lg hover:border-blue-200 transition-all group cursor-pointer"
             >
               <div className="flex items-start justify-between mb-3">

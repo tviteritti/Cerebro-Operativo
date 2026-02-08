@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Project } from '../api/projects';
 
 interface UserDashboardProps {
@@ -6,6 +7,8 @@ interface UserDashboardProps {
 }
 
 const UserDashboard: React.FC<UserDashboardProps> = ({ projects }) => {
+  const navigate = useNavigate();
+
   return (
     <div>
       <div className="mb-8">
@@ -32,6 +35,7 @@ const UserDashboard: React.FC<UserDashboardProps> = ({ projects }) => {
           {projects.map((project) => (
             <div
               key={project.id}
+              onClick={() => navigate(`/projects/${project.id}`)}
               className="bg-white rounded-2xl border border-gray-200 p-6 hover:shadow-lg hover:border-emerald-200 transition-all group cursor-pointer"
             >
               <div className="flex items-start justify-between mb-3">
