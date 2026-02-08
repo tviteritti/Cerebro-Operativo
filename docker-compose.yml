@@ -1,0 +1,51 @@
+services:
+  # ==========================================
+  # PostgreSQL Database
+  # ==========================================
+  db:
+    image: postgres:16-alpine
+    container_name: cerebro-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cerebro
+      POSTGRES_PASSWORD: cerebro_secret_2024
+      POSTGRES_DB: cerebro_operativo
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U cerebro -d cerebro_operativo']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # NestJS Backend
+  # ==========================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cerebro-backend
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USERNAME: cerebro
+      DB_PASSWORD: cerebro_secret_2024
+      DB_NAME: cerebro_operativo
+      JWT_SECRET: super-secret-jwt-key-change-in-production
+      JWT_EXPIRES_IN: 24h
+      PORT: 3000
+      ALLOWED_EMAIL_DOMAIN: miempresa.com
+      SEED_ADMIN_EMAIL: admin@miempresa.com
+      SEED_ADMIN_PASSWORD: Admin123!
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
