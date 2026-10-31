@@ -12,7 +12,7 @@ async function seed() {
     host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT || '5432'),
     username: process.env.DB_USERNAME || 'cerebro',
-    password: process.env.DB_PASSWORD || 'cerebro_secret_2024',
+    password: process.env.DB_PASSWORD || 'changeme',
     database: process.env.DB_NAME || 'cerebro_operativo',
     entities: [User, Project, ProjectMember],
     synchronize: true,
@@ -25,7 +25,7 @@ async function seed() {
 
   // Crear usuario ADMIN
   const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@miempresa.com';
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD || 'Admin123!';
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD || 'changeme';
 
   const existingAdmin = await usersRepo.findOne({
     where: { email: adminEmail },
@@ -51,7 +51,7 @@ async function seed() {
   });
 
   if (!existingUser) {
-    const hashedPassword = await bcrypt.hash('User123!', 10);
+    const hashedPassword = await bcrypt.hash(process.env.SEED_USER_PASSWORD || 'changeme', 10);
     const user = usersRepo.create({
       email: userEmail,
       password: hashedPassword,

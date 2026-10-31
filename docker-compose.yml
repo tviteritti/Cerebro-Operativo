@@ -7,9 +7,9 @@ services:
     container_name: cerebro-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: cerebro
-      POSTGRES_PASSWORD: cerebro_secret_2024
-      POSTGRES_DB: cerebro_operativo
+      POSTGRES_USER: ${POSTGRES_USER:-cerebro}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-cerebro_operativo}
     ports:
       - '5433:5432'
     volumes:
@@ -22,7 +22,7 @@ services:
       retries: 5
 
   # ==========================================
-  # Ollama - LLM Local (100% gratuito)
+  # Ollama - LLM Local
   # ==========================================
   ollama:
     image: ollama/ollama:latest
@@ -44,21 +44,28 @@ services:
     restart: unless-stopped
     ports:
       - '3000:3000'
+    # Secrets and overrides: copy backend/.env.example → backend/.env
+    env_file:
+      - ./backend/.env
     environment:
       DB_HOST: db
       DB_PORT: 5432
-      DB_USERNAME: cerebro
-      DB_PASSWORD: cerebro_secret_2024
-      DB_NAME: cerebro_operativo
-      JWT_SECRET: super-secret-jwt-key-change-in-production
+      DB_USERNAME: ${POSTGRES_USER:-cerebro}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      DB_NAME: ${POSTGRES_DB:-cerebro_operativo}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       JWT_EXPIRES_IN: 24h
       PORT: 3000
-      ALLOWED_EMAIL_DOMAIN: miempresa.com
-      SEED_ADMIN_EMAIL: admin@miempresa.com
-      SEED_ADMIN_PASSWORD: Admin123!
+      ALLOWED_EMAIL_DOMAIN: ${ALLOWED_EMAIL_DOMAIN:-miempresa.com}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@miempresa.com}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-changeme}
       OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_CHAT_MODEL: llama3.2
-      OLLAMA_EMBED_MODEL: nomic-embed-text
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-llama3.2}
+      OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+      GIT_CLONE_BASE_PATH: /data/git-workspaces
+      ALLOW_ABSOLUTE_LOCAL_REPO: 'false'
+    volumes:
+      - git_workspace:/data/git-workspaces
     depends_on:
       db:
         condition: service_healthy
@@ -66,3 +73,4 @@ services:
 volumes:
   postgres_data:
   ollama_data:
+  git_workspace:

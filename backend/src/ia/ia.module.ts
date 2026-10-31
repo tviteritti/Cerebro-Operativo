@@ -5,15 +5,25 @@ import { IaService } from './ia.service';
 import { IaController } from './ia.controller';
 import { OllamaService } from './ollama.service';
 import { EmbeddingService } from './embedding.service';
+import { ProjectToolsService } from './project-tools.service';
 import { ProjectContext } from './entities/project-context.entity';
+import { ProjectChat } from './entities/project-chat.entity';
+import { ChatMessage } from './entities/chat-message.entity';
 import { ProjectsModule } from '../projects/projects.module';
+import { ProjectChatsService } from './project-chats.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ProjectContext]),
+    TypeOrmModule.forFeature([ProjectContext, ProjectChat, ChatMessage]),
     ProjectsModule,
   ],
-  providers: [IaService, OllamaService, EmbeddingService],
+  providers: [
+    IaService,
+    OllamaService,
+    EmbeddingService,
+    ProjectToolsService,
+    ProjectChatsService,
+  ],
   controllers: [IaController],
   exports: [IaService],
 })

@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosInstance } from 'axios';
 
@@ -7,10 +12,28 @@ export interface OllamaChatMessage {
   content: string;
 }
 
+/** Mensajes para /api/chat con soporte de tools (Ollama ≥ tool calling). */
+export interface OllamaToolCall {
+  type?: string;
+  function: {
+    name: string;
+    arguments?: Record<string, unknown> | string;
+    index?: number;
+  };
+}
+
+export interface OllamaChatMessageTool {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content?: string;
+  tool_calls?: OllamaToolCall[];
+  tool_name?: string;
+}
+
 @Injectable()
 export class OllamaService implements OnModuleInit {
   private readonly logger = new Logger(OllamaService.name);
   private client: AxiosInstance;
+  private readonly ollamaBaseUrl: string;
   private chatModel: string;
   private embedModel: string;
 
@@ -19,6 +42,7 @@ export class OllamaService implements OnModuleInit {
       'OLLAMA_BASE_URL',
       'http://localhost:11434',
     );
+    this.ollamaBaseUrl = baseURL;
     this.chatModel = this.configService.get<string>(
       'OLLAMA_CHAT_MODEL',
       'llama3.2',
@@ -57,11 +81,30 @@ export class OllamaService implements OnModuleInit {
         model: this.embedModel,
         input: text,
       });
-      // La API retorna { embeddings: [[...]] } para /api/embed
-      return response.data.embeddings[0];
+      const data = response.data as {
+        embeddings?: number[][];
+        embedding?: number[];
+      };
+      const vec = data.embeddings?.[0] ?? data.embedding;
+      if (!vec?.length) {
+        this.logger.error(
+          `Embedding vacío: ${JSON.stringify(response.data).slice(0, 400)}`,
+        );
+        throw new ServiceUnavailableException(
+          `Ollama no devolvió vectores para el modelo "${this.embedModel}". Ejecutá en el host: ollama pull ${this.embedModel}`,
+        );
+      }
+      return vec;
     } catch (error) {
-      this.logger.error(`Error generando embedding: ${error.message}`);
-      throw new Error('No se pudo generar el embedding. ¿Está Ollama corriendo?');
+      if (error instanceof ServiceUnavailableException) {
+        throw error;
+      }
+      const msg =
+        error instanceof Error ? error.message : 'error desconocido';
+      this.logger.error(`Error generando embedding: ${msg}`);
+      throw new ServiceUnavailableException(
+        `No se pudo generar el embedding (${msg}). ¿Ollama está en ${this.ollamaBaseUrl} y el modelo ${this.embedModel} instalado?`,
+      );
     }
   }
 
@@ -91,6 +134,30 @@ export class OllamaService implements OnModuleInit {
     } catch (error) {
       this.logger.error(`Error en chat: ${error.message}`);
       throw new Error('No se pudo obtener respuesta del LLM. ¿Está Ollama corriendo?');
+    }
+  }
+
+  /**
+   * Una llamada a /api/chat con herramientas (sin stream). Devuelve el mensaje completo.
+   */
+  async chatOnceWithTools(
+    messages: OllamaChatMessageTool[],
+    tools: Record<string, unknown>[],
+  ): Promise<{ message: OllamaChatMessageTool }> {
+    try {
+      const response = await this.client.post('/api/chat', {
+        model: this.chatModel,
+        messages,
+        tools,
+        stream: false,
+      });
+      return response.data as { message: OllamaChatMessageTool };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'error';
+      this.logger.error(`Error en chatOnceWithTools: ${msg}`);
+      throw new Error(
+        'No se pudo obtener respuesta del LLM con herramientas. ¿Modelo con soporte de tools (p. ej. llama3.1) y Ollama actualizado?',
+      );
     }
   }
 

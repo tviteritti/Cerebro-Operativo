@@ -3,6 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { ProjectContext } from './entities/project-context.entity';
 import { OllamaService } from './ollama.service';
+import { ProjectLink } from '../projects/project-link.util';
+
+/** Evita ingestas que superen tiempo/memoria (p. ej. tras sync + repo grande). */
+const MAX_CHUNKS_PER_INGEST = 600;
 
 @Injectable()
 export class EmbeddingService {
@@ -71,11 +75,13 @@ export class EmbeddingService {
     contextData: Record<string, any>,
     infrastructureUrls: Record<string, any>,
     description: string,
+    projectLinks: ProjectLink[] = [],
     additionalContext?: string,
+    repositoryText?: string,
   ): Promise<{ chunksCreated: number }> {
     // 1. Eliminar contexto previo del proyecto
     await this.dataSource.query(
-      `DELETE FROM project_contexts WHERE project_id = $1`,
+      `DELETE FROM project_contexts WHERE project_id = $1::uuid`,
       [projectId],
     );
 
@@ -98,6 +104,25 @@ export class EmbeddingService {
       );
     }
 
+    const links = Array.isArray(projectLinks) ? projectLinks : [];
+    if (links.length > 0) {
+      textParts.push(
+        `Enlaces de referencia del proyecto (no son el código):\n${links
+          .filter((p) => p?.url?.trim())
+          .map((p) => `- ${p.label || 'Enlace'}: ${p.url.trim()}`)
+          .join('\n')}`,
+      );
+    }
+
+    if (repositoryText && repositoryText.trim().length > 0) {
+      const clip =
+        repositoryText.length > 480_000
+          ? repositoryText.slice(0, 480_000) +
+            '\n\n[... repositorio truncado para indexación ...]'
+          : repositoryText;
+      textParts.push(`Código y archivos del repositorio:\n${clip}`);
+    }
+
     if (additionalContext) {
       textParts.push(`Contexto adicional:\n${additionalContext}`);
     }
@@ -110,7 +135,13 @@ export class EmbeddingService {
     }
 
     // 3. Dividir en chunks
-    const chunks = this.chunkText(fullText);
+    let chunks = this.chunkText(fullText);
+    if (chunks.length > MAX_CHUNKS_PER_INGEST) {
+      this.logger.warn(
+        `Proyecto ${projectId}: truncando chunks de ${chunks.length} a ${MAX_CHUNKS_PER_INGEST} (límite de seguridad)`,
+      );
+      chunks = chunks.slice(0, MAX_CHUNKS_PER_INGEST);
+    }
     this.logger.log(
       `Proyecto ${projectId}: ${chunks.length} chunks generados`,
     );
@@ -123,7 +154,7 @@ export class EmbeddingService {
       // Insertar con embedding usando SQL raw (TypeORM no soporta tipo vector)
       await this.dataSource.query(
         `INSERT INTO project_contexts (id, project_id, content, "chunkIndex", embedding)
-         VALUES (gen_random_uuid(), $1, $2, $3, $4::vector)`,
+         VALUES (gen_random_uuid(), $1::uuid, $2, $3, $4::vector)`,
         [projectId, chunks[i], i, vectorStr],
       );
 
@@ -153,17 +184,35 @@ export class EmbeddingService {
     const vectorStr = `[${queryEmbedding.join(',')}]`;
 
     // 2. Buscar chunks más similares con distancia coseno
-    const results = await this.dataSource.query(
+    let results = await this.dataSource.query(
       `SELECT content, 1 - (embedding <=> $1::vector) as similarity
        FROM project_contexts
-       WHERE project_id = $2
+       WHERE project_id = $2::uuid
          AND embedding IS NOT NULL
        ORDER BY embedding <=> $1::vector
        LIMIT $3`,
       [vectorStr, projectId, topK],
     );
 
-    return results.map((r: any) => ({
+    if (!results?.length) {
+      const n = await this.getContextCount(projectId);
+      if (n > 0) {
+        this.logger.warn(
+          `RAG: la búsqueda vectorial devolvió 0 filas pero hay ${n} chunks; usando fragmentos iniciales como respaldo`,
+        );
+        results = await this.dataSource.query(
+          `SELECT content, 0::float as similarity
+           FROM project_contexts
+           WHERE project_id = $1::uuid
+             AND embedding IS NOT NULL
+           ORDER BY "chunkIndex" ASC
+           LIMIT $2`,
+          [projectId, topK],
+        );
+      }
+    }
+
+    return (results || []).map((r: any) => ({
       content: r.content,
       similarity: parseFloat(r.similarity),
     }));
@@ -174,9 +223,9 @@ export class EmbeddingService {
    */
   async getContextCount(projectId: string): Promise<number> {
     const result = await this.dataSource.query(
-      `SELECT COUNT(*) as count FROM project_contexts WHERE project_id = $1 AND embedding IS NOT NULL`,
+      `SELECT COUNT(*)::int as count FROM project_contexts WHERE project_id = $1::uuid AND embedding IS NOT NULL`,
       [projectId],
     );
-    return parseInt(result[0].count);
+    return parseInt(result[0].count, 10);
   }
 }

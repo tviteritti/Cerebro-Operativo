@@ -2,14 +2,18 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Project } from './entities/project.entity';
 import { ProjectMember } from './entities/project-member.entity';
 import { CreateProjectDto } from './dto/create-project.dto';
+import { UpdateProjectDto } from './dto/update-project.dto';
 import { AssignMemberDto } from './dto/assign-member.dto';
 import { UsersService } from '../users/users.service';
+import { GlobalRole } from '../common/enums/global-role.enum';
+import { User } from '../users/entities/user.entity';
 
 @Injectable()
 export class ProjectsService {
@@ -22,7 +26,68 @@ export class ProjectsService {
   ) {}
 
   async create(createProjectDto: CreateProjectDto): Promise<Project> {
-    const project = this.projectsRepository.create(createProjectDto);
+    const project = this.projectsRepository.create({
+      ...createProjectDto,
+      projectLinks: createProjectDto.projectLinks ?? [],
+      gitDefaultBranch: createProjectDto.gitDefaultBranch || 'main',
+    });
+    if (createProjectDto.gitRepositoryUrl === '') {
+      project.gitRepositoryUrl = null;
+    }
+    if (createProjectDto.localRepositoryPath === '') {
+      project.localRepositoryPath = null;
+    }
+    return this.projectsRepository.save(project);
+  }
+
+  async assertCanAccessProject(
+    user: Pick<User, 'id' | 'globalRole'>,
+    project: Project,
+  ): Promise<void> {
+    if (user.globalRole === GlobalRole.ADMIN) {
+      return;
+    }
+    const m = await this.membersRepository.findOne({
+      where: { projectId: project.id, userId: user.id },
+    });
+    if (!m) {
+      throw new ForbiddenException('Sin acceso a este proyecto');
+    }
+  }
+
+  async update(
+    user: Pick<User, 'id' | 'globalRole'>,
+    id: string,
+    dto: UpdateProjectDto,
+  ): Promise<Project> {
+    const project = await this.findById(id);
+    await this.assertCanAccessProject(user, project);
+    if (dto.name !== undefined) {
+      project.name = dto.name;
+    }
+    if (dto.description !== undefined) {
+      project.description = dto.description;
+    }
+    if (dto.context_data !== undefined) {
+      project.context_data = dto.context_data;
+    }
+    if (dto.infrastructure_urls !== undefined) {
+      project.infrastructure_urls = dto.infrastructure_urls;
+    }
+    if (dto.projectLinks !== undefined) {
+      project.projectLinks = dto.projectLinks;
+    }
+    if (dto.gitDefaultBranch !== undefined) {
+      project.gitDefaultBranch = dto.gitDefaultBranch || 'main';
+    }
+    if (dto.gitRepositoryUrl !== undefined) {
+      project.gitRepositoryUrl =
+        dto.gitRepositoryUrl === '' ? null : dto.gitRepositoryUrl;
+    }
+    if (dto.localRepositoryPath !== undefined) {
+      project.localRepositoryPath =
+        dto.localRepositoryPath === '' ? null : dto.localRepositoryPath;
+    }
     return this.projectsRepository.save(project);
   }
 

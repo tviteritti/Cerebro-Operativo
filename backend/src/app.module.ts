@@ -9,6 +9,8 @@ import { User } from './users/entities/user.entity';
 import { Project } from './projects/entities/project.entity';
 import { ProjectMember } from './projects/entities/project-member.entity';
 import { ProjectContext } from './ia/entities/project-context.entity';
+import { ProjectChat } from './ia/entities/project-chat.entity';
+import { ChatMessage } from './ia/entities/chat-message.entity';
 
 @Module({
   imports: [
@@ -22,9 +24,16 @@ import { ProjectContext } from './ia/entities/project-context.entity';
         host: configService.get<string>('DB_HOST', 'localhost'),
         port: configService.get<number>('DB_PORT', 5432),
         username: configService.get<string>('DB_USERNAME', 'cerebro'),
-        password: configService.get<string>('DB_PASSWORD', 'cerebro_secret_2024'),
+        password: configService.get<string>('DB_PASSWORD', 'changeme'),
         database: configService.get<string>('DB_NAME', 'cerebro_operativo'),
-        entities: [User, Project, ProjectMember, ProjectContext],
+        entities: [
+          User,
+          Project,
+          ProjectMember,
+          ProjectContext,
+          ProjectChat,
+          ChatMessage,
+        ],
         synchronize: true, // Solo para desarrollo - desactivar en producción
       }),
       inject: [ConfigService],

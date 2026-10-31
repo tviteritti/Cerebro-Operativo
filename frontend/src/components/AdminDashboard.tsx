@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Project, projectsApi } from '../api/projects';
+import ProjectLinksEditor, {
+  type ProjectLinkRow,
+} from './ProjectLinksEditor';
 
 interface AdminDashboardProps {
   projects: Project[];
@@ -17,6 +20,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [description, setDescription] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState('');
+  const [showOptional, setShowOptional] = useState(false);
+  const [optProjectLinks, setOptProjectLinks] = useState<ProjectLinkRow[]>([]);
+  const [optGit, setOptGit] = useState('');
+  const [optBranch, setOptBranch] = useState('main');
+  const [optLocal, setOptLocal] = useState('');
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,10 +32,33 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setError('');
 
     try {
-      await projectsApi.create({ name, description });
+      const projectLinks = optProjectLinks
+        .filter((r) => r.url.trim())
+        .map((r) => ({
+          label: (r.label.trim() || 'Enlace').slice(0, 160),
+          url: r.url.trim(),
+        }));
+      const gitUrl = optGit.trim();
+      await projectsApi.create({
+        name,
+        description: description || undefined,
+        ...(projectLinks.length > 0 ? { projectLinks } : {}),
+        ...(gitUrl
+          ? {
+              gitRepositoryUrl: gitUrl,
+              gitDefaultBranch: optBranch.trim() || 'main',
+            }
+          : {}),
+        ...(optLocal.trim() ? { localRepositoryPath: optLocal.trim() } : {}),
+      });
       setShowModal(false);
       setName('');
       setDescription('');
+      setShowOptional(false);
+      setOptProjectLinks([]);
+      setOptGit('');
+      setOptBranch('main');
+      setOptLocal('');
       onProjectCreated();
     } catch (err: any) {
       setError(err.response?.data?.message || 'Error al crear el proyecto');
@@ -142,6 +173,71 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   placeholder="Describe brevemente el proyecto..."
                 />
               </div>
+
+              <button
+                type="button"
+                onClick={() => setShowOptional((v) => !v)}
+                className="text-sm font-medium text-blue-600 hover:text-blue-800"
+              >
+                {showOptional
+                  ? '▴ Ocultar opcional'
+                  : '▾ Enlaces, Git y opciones avanzadas'}
+              </button>
+
+              {showOptional && (
+                <div className="space-y-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
+                  <p className="text-xs text-slate-600">
+                    Los enlaces son solo referencias (título + URL). El repo Git
+                    es aparte: sirve para clonar código en el servidor. Podés
+                    completar todo después en el detalle del proyecto.
+                  </p>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Enlaces de referencia
+                    </label>
+                    <ProjectLinksEditor
+                      compact
+                      rows={optProjectLinks}
+                      onChange={setOptProjectLinks}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        URL del repo Git (https)
+                      </label>
+                      <input
+                        type="url"
+                        value={optGit}
+                        onChange={(e) => setOptGit(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm"
+                        placeholder="https://github.com/org/repo.git"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Rama
+                      </label>
+                      <input
+                        value={optBranch}
+                        onChange={(e) => setOptBranch(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm"
+                      />
+                    </div>
+                  </div>
+                  <details className="text-xs">
+                    <summary className="cursor-pointer font-medium text-gray-700">
+                      Ruta local al clon (solo si ya tenés el repo en el disco)
+                    </summary>
+                    <input
+                      value={optLocal}
+                      onChange={(e) => setOptLocal(e.target.value)}
+                      className="w-full mt-2 px-3 py-2 border border-gray-300 rounded-xl text-sm font-mono"
+                      placeholder="Opcional"
+                    />
+                  </details>
+                </div>
+              )}
 
               <div className="flex gap-3 pt-2">
                 <button

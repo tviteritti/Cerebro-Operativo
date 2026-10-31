@@ -1,9 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { projectsApi, Project } from '../api/projects';
+import {
+  projectsApi,
+  Project,
+  type UpdateProjectData,
+} from '../api/projects';
 import { iaApi, IndexStatus } from '../api/ia';
 import ChatPanel from '../components/ChatPanel';
+import ProjectLinksEditor, {
+  type ProjectLinkRow,
+} from '../components/ProjectLinksEditor';
 
 const ProjectDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -14,6 +21,17 @@ const ProjectDetail: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isIngesting, setIsIngesting] = useState(false);
   const [ingestMessage, setIngestMessage] = useState('');
+  const [syncFromGitOnIngest, setSyncFromGitOnIngest] = useState(false);
+  const [formProjectLinks, setFormProjectLinks] = useState<ProjectLinkRow[]>(
+    [],
+  );
+  const [formGitUrl, setFormGitUrl] = useState('');
+  const [formBranch, setFormBranch] = useState('main');
+  const [formLocalPath, setFormLocalPath] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [settingsMsg, setSettingsMsg] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
 
   useEffect(() => {
     if (id) {
@@ -21,6 +39,29 @@ const ProjectDetail: React.FC = () => {
       loadIndexStatus();
     }
   }, [id]);
+
+  useEffect(() => {
+    if (!project) return;
+    const pl = project.projectLinks;
+    if (pl && pl.length > 0) {
+      setFormProjectLinks(
+        pl.map((p) => ({
+          label: p.label ?? '',
+          url: p.url ?? '',
+        })),
+      );
+    } else {
+      setFormProjectLinks([]);
+    }
+    setFormGitUrl(project.gitRepositoryUrl || '');
+    setFormBranch(project.gitDefaultBranch || 'main');
+    setFormLocalPath(project.localRepositoryPath || '');
+  }, [
+    project?.id,
+    project?.gitRepositoryUrl,
+    project?.projectLinks,
+    project?.localRepositoryPath,
+  ]);
 
   const loadProject = async () => {
     try {
@@ -30,6 +71,63 @@ const ProjectDetail: React.FC = () => {
       navigate('/dashboard');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const saveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setSettingsMsg('');
+    const projectLinks = formProjectLinks
+      .filter((r) => r.url.trim())
+      .map((r) => ({
+        label: (r.label.trim() || 'Enlace').slice(0, 160),
+        url: r.url.trim(),
+      }));
+    const payload: UpdateProjectData = {
+      projectLinks,
+      gitDefaultBranch: formBranch.trim() || 'main',
+      gitRepositoryUrl: formGitUrl.trim() || '',
+      localRepositoryPath: formLocalPath.trim() || '',
+    };
+    try {
+      const { data } = await projectsApi.update(id!, payload);
+      setProject(data);
+      setSettingsMsg('Cambios guardados.');
+    } catch (err: any) {
+      setSettingsMsg(
+        err.response?.data?.message || 'No se pudo guardar la configuración.',
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleGitSync = async () => {
+    setSyncing(true);
+    setSyncMsg('');
+    try {
+      const { data } = await projectsApi.gitSync(id!);
+      setProject((p) =>
+        p
+          ? {
+              ...p,
+              lastGitSyncAt: data.lastGitSyncAt,
+              lastGitBranch: data.lastGitBranch,
+              lastGitCommitShort: data.lastGitCommitShort,
+              lastGitCommitMessage: data.lastGitCommitMessage,
+              lastGitSyncError: data.lastGitSyncError,
+            }
+          : p,
+      );
+      await loadProject();
+      setSyncMsg('Repositorio actualizado. Podés re-indexar para mezclar el código al RAG.');
+    } catch (err: any) {
+      setSyncMsg(
+        err.response?.data?.message || 'Error al sincronizar con Git.',
+      );
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -46,7 +144,9 @@ const ProjectDetail: React.FC = () => {
     setIsIngesting(true);
     setIngestMessage('');
     try {
-      const response = await iaApi.ingest(id!);
+      const response = await iaApi.ingest(id!, {
+        syncFromGit: syncFromGitOnIngest,
+      });
       setIngestMessage(
         `✅ ${response.data.chunksCreated} fragmentos indexados exitosamente`,
       );
@@ -71,7 +171,7 @@ const ProjectDetail: React.FC = () => {
   if (!project) return null;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="h-screen max-h-[100dvh] overflow-hidden bg-gray-50 flex flex-col">
       {/* Navbar */}
       <nav className="bg-white border-b border-gray-200 shadow-sm shrink-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -145,10 +245,10 @@ const ProjectDetail: React.FC = () => {
         </div>
       </nav>
 
-      {/* Content — Two columns */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* Content — Two columns (min-h-0 evita que la columna derecha estire la página sin límite) */}
+      <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Left: Project Info */}
-        <div className="flex-1 overflow-y-auto p-6 lg:p-8">
+        <div className="flex-1 overflow-y-auto min-h-0 p-6 lg:p-8">
           <div className="max-w-3xl">
             {/* Description */}
             <div className="bg-white rounded-2xl border border-gray-200 p-6 mb-6">
@@ -159,6 +259,156 @@ const ProjectDetail: React.FC = () => {
                 {project.description || 'Sin descripción'}
               </p>
             </div>
+
+            <form
+              onSubmit={saveSettings}
+              className="bg-white rounded-2xl border border-gray-200 p-6 mb-6 space-y-6"
+            >
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">
+                  Configuración del proyecto
+                </h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  Hay <strong className="text-gray-700">dos cosas distintas</strong>:
+                  enlaces útiles (web) y el <strong className="text-gray-700">repo Git</strong>{' '}
+                  para bajar código. El token de GitHub/Bitbucket va solo en el servidor
+                  (<code className="text-xs bg-gray-100 px-1 rounded">GIT_PERSONAL_ACCESS_TOKEN</code>
+                  ), no aquí.
+                </p>
+              </div>
+
+              <div className="border-t border-gray-100 pt-4 space-y-2">
+                <h3 className="text-base font-semibold text-gray-900">
+                  Enlaces de referencia
+                </h3>
+                <p className="text-sm text-gray-500">
+                  Dashboards, staging, Jira, docs… Solo texto para el contexto de la IA.
+                  No sirven para hacer <code className="text-xs">git pull</code>.
+                </p>
+                <ProjectLinksEditor
+                  rows={formProjectLinks}
+                  onChange={setFormProjectLinks}
+                />
+              </div>
+
+              <div className="border-t border-gray-100 pt-4 space-y-3">
+                <h3 className="text-base font-semibold text-gray-900">
+                  Repositorio Git (código)
+                </h3>
+                <p className="text-sm text-gray-500">
+                  Es la dirección que usa el servidor para <strong>clonar o actualizar</strong>{' '}
+                  el proyecto. Guardá acá y después usá{' '}
+                  <strong>Sincronizar repositorio</strong> para hacer pull (o marcá sincronizar
+                  al indexar).
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      URL del repo (https, sin token)
+                    </label>
+                    <input
+                      type="url"
+                      value={formGitUrl}
+                      onChange={(e) => setFormGitUrl(e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                      placeholder="https://github.com/org/repo.git"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Rama a seguir
+                    </label>
+                    <input
+                      value={formBranch}
+                      onChange={(e) => setFormBranch(e.target.value)}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                      placeholder="main"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <details className="border border-dashed border-gray-200 rounded-xl p-4 bg-gray-50/80">
+                <summary className="cursor-pointer text-sm font-medium text-gray-700">
+                  Opciones avanzadas — carpeta Git en tu PC
+                </summary>
+                <p className="text-sm text-gray-500 mt-2 mb-2">
+                  Solo si ya tenés el repo clonado en disco y querés que el sync haga{' '}
+                  <code className="text-xs">git pull</code> ahí en lugar del clon del servidor.
+                  Si solo configurás la URL de arriba, el sistema descarga solo en el servidor;
+                  no necesitás esta ruta.
+                </p>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Ruta absoluta al clon (opcional)
+                </label>
+                <input
+                  value={formLocalPath}
+                  onChange={(e) => setFormLocalPath(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-mono bg-white"
+                  placeholder="Vacío = usar solo el clon del servidor"
+                />
+              </details>
+              {settingsMsg && (
+                <p
+                  className={
+                    settingsMsg.startsWith('Cambios')
+                      ? 'text-sm text-emerald-600'
+                      : 'text-sm text-red-600'
+                  }
+                >
+                  {settingsMsg}
+                </p>
+              )}
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-xl hover:bg-gray-800 disabled:opacity-50"
+                >
+                  {saving ? 'Guardando…' : 'Guardar'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleGitSync}
+                  disabled={syncing}
+                  className="px-4 py-2 border border-indigo-200 text-indigo-800 text-sm font-medium rounded-xl hover:bg-indigo-50 disabled:opacity-50"
+                >
+                  {syncing ? 'Sincronizando…' : 'Sincronizar repositorio (git)'}
+                </button>
+              </div>
+              <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-700 space-y-1">
+                <p>
+                  <span className="font-medium text-slate-900">Última sync:</span>{' '}
+                  {project.lastGitSyncAt
+                    ? new Date(project.lastGitSyncAt).toLocaleString('es-AR')
+                    : 'nunca'}
+                </p>
+                {project.lastGitBranch && (
+                  <p>
+                    <span className="font-medium text-slate-900">Rama:</span>{' '}
+                    {project.lastGitBranch}
+                  </p>
+                )}
+                {project.lastGitCommitShort && (
+                  <p>
+                    <span className="font-medium text-slate-900">Commit:</span>{' '}
+                    {project.lastGitCommitShort}{' '}
+                    {project.lastGitCommitMessage
+                      ? `— ${project.lastGitCommitMessage.split('\n')[0]}`
+                      : null}
+                  </p>
+                )}
+                {project.lastGitSyncError && (
+                  <p className="text-red-600">
+                    <span className="font-medium">Error:</span>{' '}
+                    {project.lastGitSyncError}
+                  </p>
+                )}
+                {syncMsg && (
+                  <p className="text-indigo-700 font-medium pt-1">{syncMsg}</p>
+                )}
+              </div>
+            </form>
 
             {/* Context Data */}
             {project.context_data &&
@@ -247,11 +497,21 @@ const ProjectDetail: React.FC = () => {
 
               <p className="text-sm text-gray-600 mb-4">
                 Indexa el contexto del proyecto para que la IA pueda responder
-                preguntas sobre él. Esto genera embeddings vectoriales del
-                contenido.
+                preguntas sobre él. Incluye enlaces, metadatos y, si tenés
+                repositorio sincronizado, una muestra de código.
               </p>
+              <label className="flex items-center gap-2 mb-4 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={syncFromGitOnIngest}
+                  onChange={(e) => setSyncFromGitOnIngest(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                Sincronizar repositorio (git pull) antes de indexar
+              </label>
 
               <button
+                type="button"
                 onClick={handleIngest}
                 disabled={isIngesting}
                 className="inline-flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-400 text-white font-semibold rounded-xl transition-all shadow-lg shadow-violet-200"
@@ -310,8 +570,8 @@ const ProjectDetail: React.FC = () => {
           </div>
         </div>
 
-        {/* Right: Chat Panel */}
-        <div className="w-full lg:w-[420px] border-l border-gray-200 flex flex-col hidden lg:flex">
+        {/* Right: Chat Panel — altura limitada al viewport; scroll interno en ChatPanel */}
+        <div className="w-full lg:w-[min(36rem,100%)] border-l border-gray-200 flex flex-col min-h-0 max-h-full hidden lg:flex">
           <ChatPanel projectId={id!} projectName={project.name} />
         </div>
       </div>
